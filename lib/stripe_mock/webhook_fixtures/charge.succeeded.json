@@ -50,6 +50,9 @@
       "description": null,
       "dispute": null,
       "metadata": {
+        "order_ids": [
+          1234
+        ]
       }
     }
   }
