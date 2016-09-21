@@ -42,7 +42,7 @@ module StripeMock
         'account.external_account.updated',
         'account.external_account.deleted',
         'balance.available',
-        'change.captured',
+        'charge.captured',
         'charge.succeeded',
         'charge.failed',
         'charge.refunded',
