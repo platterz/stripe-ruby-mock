@@ -9,28 +9,44 @@ module StripeMock
         klass.add_handler 'post /v1/charges/(.*)/capture',  :capture_charge
         klass.add_handler 'post /v1/charges/(.*)/refund',   :refund_charge
         klass.add_handler 'post /v1/charges/(.*)/refunds',  :create_refund
+        klass.add_handler 'post /v1/refunds',               :create_refund
         klass.add_handler 'post /v1/charges/(.*)',          :update_charge
       end
 
       def new_charge(route, method_url, params, headers)
+        if params[:idempotency_key] && charges.any?
+          original_charge = charges.values.find { |c| c[:idempotency_key] == params[:idempotency_key]}
+          return charges[original_charge[:id]] if original_charge
+        end
+
         id = new_id('ch')
 
-        if params[:source] && params[:source].is_a?(String)
-          # if a customer is provided, the card parameter is assumed to be the actual
-          # card id, not a token. in this case we'll find the card in the customer
-          # object and return that.
-          if params[:customer]
-            params[:source] = get_card(customers[params[:customer]], params[:source])
-          else
-            params[:source] = get_card_by_token(params[:source])
+        if params[:source]
+          if params[:source].is_a?(String)
+            # if a customer is provided, the card parameter is assumed to be the actual
+            # card id, not a token. in this case we'll find the card in the customer
+            # object and return that.
+            if params[:customer]
+              params[:source] = get_card(customers[params[:customer]], params[:source])
+            else
+              params[:source] = get_card_by_token(params[:source])
+            end
+          elsif params[:source][:id]
+            raise Stripe::InvalidRequestError.new("Invalid token id: #{params[:source]}", 'card', 400)
           end
-        elsif params[:source] && params[:source][:id]
-          raise Stripe::InvalidRequestError.new("Invalid token id: #{params[:card]}", 'card', 400)
+        elsif params[:customer]
+          customer = customers[params[:customer]]
+          if customer && customer[:default_source]
+            params[:source] = get_card(customer, customer[:default_source])
+          end
         end
 
         ensure_required_params(params)
+        bal_trans_params = { amount: params[:amount], source: params[:source] }
 
-        charges[id] = Data.mock_charge(params.merge :id => id, :balance_transaction => new_balance_transaction('txn'))
+        charges[id] = Data.mock_charge(
+            params.merge :id => id,
+            :balance_transaction => new_balance_transaction('txn', bal_trans_params))
       end
 
       def update_charge(route, method_url, params, headers)
@@ -62,7 +78,8 @@ module StripeMock
 
       def get_charge(route, method_url, params, headers)
         route =~ method_url
-        assert_existence :charge, $1, charges[$1]
+        charge_id = $1 || params[:charge]
+        assert_existence :charge, charge_id, charges[charge_id]
       end
 
       def capture_charge(route, method_url, params, headers)

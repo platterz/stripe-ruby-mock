@@ -65,6 +65,31 @@ shared_examples 'Charge API' do
     expect(charge.status).to eq('succeeded')
   end
 
+  it 'creates a stripe charge item with a customer', :live => true do
+    customer = Stripe::Customer.create({
+      email: 'johnny@appleseed.com',
+      source: stripe_helper.generate_card_token(number: '4012888888881881', address_city: 'LA'),
+      description: "a description"
+    })
+
+    expect(customer.sources.data.length).to eq(1)
+    expect(customer.sources.data[0].id).not_to be_nil
+    expect(customer.sources.data[0].last4).to eq('1881')
+
+    charge = Stripe::Charge.create(
+      amount: 999,
+      currency: 'USD',
+      customer: customer.id,
+      description: 'a charge with a specific customer'
+    )
+
+    expect(charge.id).to match(/^(test_)?ch/)
+    expect(charge.amount).to eq(999)
+    expect(charge.description).to eq('a charge with a specific customer')
+    expect(charge.captured).to eq(true)
+    expect(charge.source.last4).to eq('1881')
+    expect(charge.source.address_city).to eq('LA')
+  end
 
   it "creates a stripe charge item with a customer and card id" do
     customer = Stripe::Customer.create({
@@ -111,6 +136,18 @@ shared_examples 'Charge API' do
 
     expect(data[charge2.id]).to_not be_nil
     expect(data[charge2.id][:amount]).to eq(777)
+  end
+
+  it "creates a balance transaction" do
+    charge = Stripe::Charge.create({
+      amount: 300,
+      currency: 'USD',
+      source: stripe_helper.generate_card_token
+    })
+    bal_trans = Stripe::BalanceTransaction.retrieve(charge.balance_transaction)
+    expect(bal_trans.amount).to eq(charge.amount)
+    expect(bal_trans.fee).to eq(39)
+    expect(bal_trans.source).to eq(charge.source)
   end
 
   it "retrieves a stripe charge" do
@@ -266,7 +303,8 @@ shared_examples 'Charge API' do
             object: 'card',
             number: '4242424242424242',
             exp_month: 12,
-            exp_year: 2024
+            exp_year: 2024,
+            cvc: 123
         }
     )
     12.times do
@@ -346,6 +384,33 @@ shared_examples 'Charge API' do
       expect(returned_charge.application_fee).to eq(123)
       expect(returned_charge.id).to eq(charge.id)
       expect(returned_charge.captured).to eq(true)
+    end
+  end
+
+  describe "idempotency" do
+    let(:idempotent_charge_params) {{
+      amount: 777,
+      currency: 'USD',
+      card: stripe_helper.generate_card_token,
+      capture: true,
+      idempotency_key: 'onceisenough'
+    }}
+
+    it "returns the original charge if the same idempotency_key is passed in" do
+      charge1 = Stripe::Charge.create(idempotent_charge_params)
+      charge2 = Stripe::Charge.create(idempotent_charge_params)
+
+      expect(charge1).to eq(charge2)
+    end
+
+    it "returns different charges if different idempotency_keys are used for each charge" do
+      idempotent_charge_params2 = idempotent_charge_params.clone
+      idempotent_charge_params2[:idempotency_key] = 'thisoneisdifferent'
+
+      charge1 = Stripe::Charge.create(idempotent_charge_params)
+      charge2 = Stripe::Charge.create(idempotent_charge_params2)
+
+      expect(charge1).not_to eq(charge2)
     end
   end
 
