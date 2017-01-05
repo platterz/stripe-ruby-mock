@@ -2,11 +2,19 @@ require 'spec_helper'
 
 shared_examples 'Refund API' do
 
+  let(:charge) do
+    Stripe::Charge.create(
+      amount: 999,
+      currency: 'USD',
+      source: stripe_helper.generate_card_token,
+      description: 'card charge'
+    )
+  end
   it "refunds a stripe charge item" do
     charge = Stripe::Charge.create(
       amount: 999,
       currency: 'USD',
-      card: stripe_helper.generate_card_token,
+      source: stripe_helper.generate_card_token,
       description: 'card charge'
     )
 
@@ -21,7 +29,7 @@ shared_examples 'Refund API' do
     charge = Stripe::Charge.create(
       amount: 999,
       currency: 'USD',
-      card: stripe_helper.generate_card_token,
+      source: stripe_helper.generate_card_token,
       description: 'card charge'
     )
     refund = charge.refund
@@ -34,7 +42,7 @@ shared_examples 'Refund API' do
     charge = Stripe::Charge.create(
       amount: 999,
       currency: 'USD',
-      card: stripe_helper.generate_card_token,
+      source: stripe_helper.generate_card_token,
       description: 'card charge'
     )
     refund = charge.refund
@@ -47,7 +55,7 @@ shared_examples 'Refund API' do
     charge = Stripe::Charge.create(
       amount: 999,
       currency: 'USD',
-      card: stripe_helper.generate_card_token,
+      source: stripe_helper.generate_card_token,
       description: 'card charge'
     )
     refund = charge.refund
@@ -55,12 +63,12 @@ shared_examples 'Refund API' do
     expect(refund.refunds.data.count).to eq 1
     expect(refund.refunds.data.first.status).to eq("succeeded")
   end
-  
+
   it "creates a stripe refund with a different balance transaction than the charge" do
     charge = Stripe::Charge.create(
       amount: 999,
       currency: 'USD',
-      card: stripe_helper.generate_card_token,
+      source: stripe_helper.generate_card_token,
       description: 'card charge'
     )
     refund = charge.refund
@@ -69,7 +77,7 @@ shared_examples 'Refund API' do
   end
 
   it "creates a refund off a charge", :live => true do
-    original = Stripe::Charge.create(amount: 555, currency: 'USD', card: stripe_helper.generate_card_token)
+    original = Stripe::Charge.create(amount: 555, currency: 'USD', source: stripe_helper.generate_card_token)
 
     charge = Stripe::Charge.retrieve(original.id)
 
@@ -79,7 +87,7 @@ shared_examples 'Refund API' do
   end
 
   it "handles multiple refunds", :live => true do
-    original = Stripe::Charge.create(amount: 1100, currency: 'USD', card: stripe_helper.generate_card_token)
+    original = Stripe::Charge.create(amount: 1100, currency: 'USD', source: stripe_helper.generate_card_token)
 
     charge = Stripe::Charge.retrieve(original.id)
 
@@ -105,7 +113,7 @@ shared_examples 'Refund API' do
     charge = Stripe::Charge.create(
         amount: 999,
         currency: 'USD',
-        card: stripe_helper.generate_card_token,
+        source: stripe_helper.generate_card_token,
         description: 'card charge'
     )
     refund = Stripe::Refund.create(
@@ -114,5 +122,12 @@ shared_examples 'Refund API' do
     )
 
     expect(refund).to be_a(Stripe::Refund)
+    expect(refund.amount).to eq(500)
+  end
+
+  it 'refunds entire charge if amount is not set', live: true do
+    refund = Stripe::Refund.create(charge: charge.id)
+
+    expect(refund.amount).to eq(charge.amount)
   end
 end

@@ -29,7 +29,7 @@ module StripeMock
             if params[:customer]
               params[:source] = get_card(customers[params[:customer]], params[:source])
             else
-              params[:source] = get_card_by_token(params[:source])
+              params[:source] = get_card_or_bank_by_token(params[:source])
             end
           elsif params[:source][:id]
             raise Stripe::InvalidRequestError.new("Invalid token id: #{params[:source]}", 'card', 400)
@@ -44,9 +44,18 @@ module StripeMock
         ensure_required_params(params)
         bal_trans_params = { amount: params[:amount], source: params[:source] }
 
+        balance_transaction_id = new_balance_transaction('txn', bal_trans_params)
+
         charges[id] = Data.mock_charge(
             params.merge :id => id,
-            :balance_transaction => new_balance_transaction('txn', bal_trans_params))
+            :balance_transaction => balance_transaction_id)
+
+        if params[:expand] == ['balance_transaction']
+          charges[id][:balance_transaction] =
+            balance_transactions[balance_transaction_id]
+        end
+
+        charges[id]
       end
 
       def update_charge(route, method_url, params, headers)
@@ -120,7 +129,8 @@ module StripeMock
         refund = Data.mock_refund params.merge(
           :balance_transaction => new_balance_transaction('txn'),
           :id => new_id('re'),
-          :charge => charge[:id]
+          :charge => charge[:id],
+          :amount => (params[:amount] || charge[:amount])
         )
         add_refund_to_charge(refund, charge)
         refund
@@ -137,6 +147,8 @@ module StripeMock
           raise Stripe::InvalidRequestError.new("Invalid integer: #{params[:amount]}", 'amount', 400)
         elsif non_positive_charge_amount?(params)
           raise Stripe::InvalidRequestError.new('Invalid positive integer', 'amount', 400)
+        elsif params[:source].nil? && params[:customer].nil?
+          raise Stripe::InvalidRequestError.new('Must provide source or customer.', nil)
         end
       end
 
