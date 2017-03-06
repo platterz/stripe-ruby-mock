@@ -8,8 +8,7 @@ module StripeMock
         klass.add_handler 'get /v1/charges/(.*)',           :get_charge
         klass.add_handler 'post /v1/charges/(.*)/capture',  :capture_charge
         klass.add_handler 'post /v1/charges/(.*)/refund',   :refund_charge
-        klass.add_handler 'post /v1/charges/(.*)/refunds',  :create_refund
-        klass.add_handler 'post /v1/refunds',               :create_refund
+        klass.add_handler 'post /v1/charges/(.*)/refunds',  :refund_charge
         klass.add_handler 'post /v1/charges/(.*)',          :update_charge
       end
 
@@ -50,12 +49,13 @@ module StripeMock
             params.merge :id => id,
             :balance_transaction => balance_transaction_id)
 
+        charge = charges[id].clone
         if params[:expand] == ['balance_transaction']
-          charges[id][:balance_transaction] =
+          charge[:balance_transaction] =
             balance_transactions[balance_transaction_id]
         end
 
-        charges[id]
+        charge
       end
 
       def update_charge(route, method_url, params, headers)
@@ -88,7 +88,15 @@ module StripeMock
       def get_charge(route, method_url, params, headers)
         route =~ method_url
         charge_id = $1 || params[:charge]
-        assert_existence :charge, charge_id, charges[charge_id]
+        charge = assert_existence :charge, charge_id, charges[charge_id]
+
+        charge = charge.clone
+        if params[:expand] == ['balance_transaction']
+          balance_transaction = balance_transactions[charge[:balance_transaction]]
+          charge[:balance_transaction] = balance_transaction
+        end
+
+        charge
       end
 
       def capture_charge(route, method_url, params, headers)
@@ -115,25 +123,12 @@ module StripeMock
       def refund_charge(route, method_url, params, headers)
         charge = get_charge(route, method_url, params, headers)
 
-        refund = Data.mock_refund params.merge(
-          :balance_transaction => new_balance_transaction('txn'),
-          :id => new_id('re')
+        new_refund(
+          route,
+          method_url,
+          params.merge(:charge => charge[:id]),
+          headers
         )
-        add_refund_to_charge(refund, charge)
-        charge
-      end
-
-      def create_refund(route, method_url, params, headers)
-        charge = get_charge(route, method_url, params, headers)
-
-        refund = Data.mock_refund params.merge(
-          :balance_transaction => new_balance_transaction('txn'),
-          :id => new_id('re'),
-          :charge => charge[:id],
-          :amount => (params[:amount] || charge[:amount])
-        )
-        add_refund_to_charge(refund, charge)
-        refund
       end
 
       private
