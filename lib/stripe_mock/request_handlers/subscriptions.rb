@@ -46,11 +46,11 @@ module StripeMock
           customer[:default_source] = new_card[:id]
         end
 
-        # Ensure customer has card to charge if plan has no trial and is not free
-        verify_card_present(customer, plan, params)
-
         subscription = Data.mock_subscription({ id: (params[:id] || new_id('su')) })
         subscription.merge!(custom_subscription_params(plan, customer, params))
+
+        # Ensure customer has card to charge if plan has no trial and is not free
+        verify_card_present(customer, plan, subscription, params)
 
         if params[:coupon]
           coupon_id = params[:coupon]
@@ -79,7 +79,8 @@ module StripeMock
         plan_id = params[:plan].to_s
         plan = assert_existence :plan, plan_id, plans[plan_id]
 
-        customer_id = params[:customer].to_s
+        customer = params[:customer]
+        customer_id = customer.is_a?(Stripe::Customer) ? customer[:id] : customer.to_s
         customer = assert_existence :customer, customer_id, customers[customer_id]
 
         if params[:source]
@@ -88,11 +89,17 @@ module StripeMock
           customer[:default_source] = new_card[:id]
         end
 
-        # Ensure customer has card to charge if plan has no trial and is not free
-        verify_card_present(customer, plan, params)
+        allowed_params = %w(customer application_fee_percent coupon items metadata plan quantity source tax_percent trial_end trial_period_days current_period_start)
+        unknown_params = params.keys - allowed_params.map(&:to_sym)
+        if unknown_params.length > 0
+          raise Stripe::InvalidRequestError.new("Received unknown parameter: #{unknown_params.join}", unknown_params.first.to_s, 400)
+        end
 
         subscription = Data.mock_subscription({ id: (params[:id] || new_id('su')) })
         subscription.merge!(custom_subscription_params(plan, customer, params))
+
+        # Ensure customer has card to charge if plan has no trial and is not free
+        verify_card_present(customer, plan, subscription, params)
 
         if params[:coupon]
           coupon_id = params[:coupon]
@@ -169,7 +176,7 @@ module StripeMock
 
         assert_existence :plan, plan_name, plan
         params[:plan] = plan if params[:plan]
-        verify_card_present(customer, plan)
+        verify_card_present(customer, plan, subscription)
 
         if subscription[:cancel_at_period_end]
           subscription[:cancel_at_period_end] = false
@@ -216,9 +223,8 @@ module StripeMock
 
       private
 
-      def verify_card_present(customer, plan, params={})
-        if customer[:default_source].nil? && customer[:trial_end].nil? && plan[:trial_period_days].nil? &&
-           plan[:amount] != 0 && plan[:trial_end].nil? && params[:trial_end].nil?
+      def verify_card_present(customer, plan, subscription, params={})
+        if customer[:default_source].nil? && customer[:trial_end].nil? && plan[:trial_period_days].nil? && plan[:amount] != 0 && plan[:trial_end].nil? && params[:trial_end].nil? && (subscription.nil? || subscription[:trial_end].nil? || subscription[:trial_end] == 'now')
           raise Stripe::InvalidRequestError.new('You must supply a valid card xoxo', nil, 400)
         end
       end
